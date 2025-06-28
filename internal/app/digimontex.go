@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/gdamore/tcell/v2"
@@ -82,6 +83,9 @@ func (a *App) setupMainContent() tview.Primitive {
 
 	digimonListBlock := tview.NewFlex()
 
+	// Fetch default digimon detail
+	// This could be any digimon, here we use "Greymon" as an example
+	// You can change this to any other digimon name or ID as needed
 	digimonDetail, err := services.GetDigimonByName("Greymon")
 	if err != nil {
 		log.Println("Failed to fetch digimon detail:", err)
@@ -89,6 +93,7 @@ func (a *App) setupMainContent() tview.Primitive {
 	}
 	a.digimon = digimonDetail
 
+	// Setup the digimon block and list
 	a.setupDigimonBlock(a.digimonBlock)
 	a.setupListDigimonBlock(digimonListBlock)
 
@@ -179,14 +184,83 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 	leftBlock := tview.NewFlex().SetDirection(tview.FlexRow)
 	rightBlock := tview.NewFlex().SetDirection(tview.FlexRow)
 
+	// Setup left block
 	imageFlex := tview.NewImage()
 	if image := services.GetImageByURL(a.digimon.Images[0].Href); image != nil {
 		imageFlex.SetImage(image)
-		leftBlock.AddItem(imageFlex, 0, 1, false)
+		leftBlock.AddItem(imageFlex, 18, 0, false)
 	} else {
 		log.Println("Failed to load digimon image")
 	}
+	
+	digimonName := tview.NewTextView().
+		SetText(fmt.Sprintf("Name: %s", a.digimon.Name))
+	leftBlock.AddItem(digimonName, 0, 1, false)
 
+	digimonReleaseDate := tview.NewTextView().
+		SetText(fmt.Sprintf("Release Date: %s", a.digimon.ReleaseDate))
+	leftBlock.AddItem(digimonReleaseDate, 0, 1, false)
+
+	var levels string
+	if len(a.digimon.Levels) > 0 {
+		for i, t := range a.digimon.Levels {
+			if i > 0 {
+				levels += ", "
+			}
+			levels += t.Level
+		}
+	} else {
+		levels = "Unknown"
+	}
+	digimonLevel := tview.NewTextView().
+		SetText(fmt.Sprintf("Levels: %s", levels))
+	leftBlock.AddItem(digimonLevel, 0, 1, false)
+
+	var types string
+	if len(a.digimon.Types) > 0 {
+		for i, t := range a.digimon.Types {
+			if i > 0 {
+				types += ", "
+			}
+			types += t.Type
+		}
+	} else {
+		types = "Unknown"
+	}
+	digimonTypes := tview.NewTextView().
+		SetText(fmt.Sprintf("Types: %s", types))
+	leftBlock.AddItem(digimonTypes, 0, 1, false)
+
+	var attributes string
+	if len(a.digimon.Attributes) > 0 {
+		for i, t := range a.digimon.Attributes {
+			if i > 0 {
+				attributes += ", "
+			}
+			attributes += t.Attribute
+		}
+	} else {
+		attributes = "Unknown"
+	}
+	digimonAttributes := tview.NewTextView().
+		SetText(fmt.Sprintf("Attributes: %s", attributes))
+	leftBlock.AddItem(digimonAttributes, 0, 1, false)
+
+	fieldBlock := tview.NewFlex().SetDirection(tview.FlexColumn)
+	for _, field := range a.digimon.Fields {
+		fieldImage := tview.NewImage()
+		if image := services.GetImageByURL(field.Image); image != nil {
+			fieldImage.SetImage(image).SetFocusFunc(func() {
+				log.Println("Field image clicked:", field.Image)
+			})
+		} else {
+			log.Println("Failed to load field image:", field.Image)
+		}
+		fieldBlock.AddItem(fieldImage, 0, 1, false)
+	}
+	leftBlock.AddItem(fieldBlock, 3, 0, false)
+
+	// Right block
 	var description string
 	for _, descriptionItem := range a.digimon.Descriptions {
 		if descriptionItem.Language == "en_us" {
@@ -202,6 +276,20 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		SetTextColor(tcell.ColorWhiteSmoke), 0, 1, false)
 
 	rightBlock.AddItem(descriptionBlock, 0, 1, false)
+
+	skillBlock := tview.NewFlex()
+	skillBlock.SetDirection(tview.FlexRow)
+	skillBlock.SetBorder(true)
+	skillBlock.SetTitle("Skills").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorWhite)
+	for _, skill := range a.digimon.Skills {
+		skillText := fmt.Sprintf("%s: %s", skill.Skill, skill.Description)
+		skillItem := tview.NewTextView().
+			SetText(skillText).
+			SetTextColor(tcell.ColorWhiteSmoke)
+		skillItem.SetWrap(true)
+		skillBlock.AddItem(skillItem, 0, 1, false)
+	}
+	rightBlock.AddItem(skillBlock, 0, 1, false)
 
 	block.AddItem(leftBlock, 0, 1, false)
 	block.AddItem(rightBlock, 0, 1, false)
