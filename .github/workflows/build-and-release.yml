@@ -151,4 +151,4 @@ jobs:
         prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         generate_release_notes: true
       env:
-        GITHUB_TOKEN: ${{ secrets.MY_CUSTOM_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
