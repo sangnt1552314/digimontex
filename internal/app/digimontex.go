@@ -220,7 +220,7 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		fieldBlock.AddItem(fieldImage, 0, 1, false)
 	}
 	imagesFlex.AddItem(fieldBlock, 0, 1, false)
-	leftBlock.AddItem(imagesFlex, 18, 0, false)
+	leftBlock.AddItem(imagesFlex, 0, 8, false)
 
 	digimonName := tview.NewTextView().
 		SetText(fmt.Sprintf("Name: %s", a.digimon.Name)).
@@ -286,6 +286,8 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		if descriptionItem.Language == "en_us" {
 			description = descriptionItem.Description
 			break
+		} else {
+			description = "No description available in English"
 		}
 	}
 	descriptionBlock := tview.NewFlex()
