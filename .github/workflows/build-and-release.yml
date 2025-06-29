@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  releases: write
 
 env:
   GO_VERSION: '1.21'
