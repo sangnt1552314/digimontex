@@ -2,7 +2,9 @@ package app
 
 import (
 	"fmt"
+	"image/png"
 	"log"
+	"os"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -185,21 +187,50 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 	rightBlock := tview.NewFlex().SetDirection(tview.FlexRow)
 
 	// Setup left block
+	imagesFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
+
 	imageFlex := tview.NewImage()
 	if image := services.GetImageByURL(a.digimon.Images[0].Href); image != nil {
-		imageFlex.SetImage(image)
-		leftBlock.AddItem(imageFlex, 18, 0, false)
+		imageFlex.SetImage(image).SetAlign(0, 0)
+		imagesFlex.AddItem(imageFlex, 0, 8, false)
 	} else {
-		log.Println("Failed to load digimon image")
+		noImageFile, err := os.Open("assets/no-image.png")
+		if err != nil {
+			log.Println("Failed to open no-image.png:", err)
+		} else {
+			defer noImageFile.Close()
+			noImage, err := png.Decode(noImageFile)
+			if err != nil {
+				log.Println("Failed to decode no-image.png:", err)
+			} else {
+				imageFlex.SetImage(noImage).SetAlign(0, 0)
+			}
+		}
+		imagesFlex.AddItem(imageFlex, 0, 9, false)
 	}
-	
+
+	fieldBlock := tview.NewFlex().SetDirection(tview.FlexRow)
+	for _, field := range a.digimon.Fields {
+		fieldImage := tview.NewImage()
+		if image := services.GetImageByURL(field.Image); image != nil {
+			fieldImage.SetImage(image)
+		} else {
+			log.Println("Failed to load field image:", field.Image)
+		}
+		fieldBlock.AddItem(fieldImage, 0, 1, false)
+	}
+	imagesFlex.AddItem(fieldBlock, 0, 1, false)
+	leftBlock.AddItem(imagesFlex, 18, 0, false)
+
 	digimonName := tview.NewTextView().
-		SetText(fmt.Sprintf("Name: %s", a.digimon.Name))
-	leftBlock.AddItem(digimonName, 0, 1, false)
+		SetText(fmt.Sprintf("Name: %s", a.digimon.Name)).
+		SetTextColor(tcell.ColorGold)
+	leftBlock.AddItem(digimonName, 1, 0, false)
 
 	digimonReleaseDate := tview.NewTextView().
-		SetText(fmt.Sprintf("Release Date: %s", a.digimon.ReleaseDate))
-	leftBlock.AddItem(digimonReleaseDate, 0, 1, false)
+		SetText(fmt.Sprintf("Release Date: %s", a.digimon.ReleaseDate)).
+		SetTextColor(tcell.ColorSilver)
+	leftBlock.AddItem(digimonReleaseDate, 1, 0, false)
 
 	var levels string
 	if len(a.digimon.Levels) > 0 {
@@ -213,8 +244,9 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		levels = "Unknown"
 	}
 	digimonLevel := tview.NewTextView().
-		SetText(fmt.Sprintf("Levels: %s", levels))
-	leftBlock.AddItem(digimonLevel, 0, 1, false)
+		SetText(fmt.Sprintf("Levels: %s", levels)).
+		SetTextColor(tcell.ColorGreen)
+	leftBlock.AddItem(digimonLevel, 1, 0, false)
 
 	var types string
 	if len(a.digimon.Types) > 0 {
@@ -228,8 +260,9 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		types = "Unknown"
 	}
 	digimonTypes := tview.NewTextView().
-		SetText(fmt.Sprintf("Types: %s", types))
-	leftBlock.AddItem(digimonTypes, 0, 1, false)
+		SetText(fmt.Sprintf("Types: %s", types)).
+		SetTextColor(tcell.ColorPurple)
+	leftBlock.AddItem(digimonTypes, 1, 0, false)
 
 	var attributes string
 	if len(a.digimon.Attributes) > 0 {
@@ -243,22 +276,9 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		attributes = "Unknown"
 	}
 	digimonAttributes := tview.NewTextView().
-		SetText(fmt.Sprintf("Attributes: %s", attributes))
-	leftBlock.AddItem(digimonAttributes, 0, 1, false)
-
-	fieldBlock := tview.NewFlex().SetDirection(tview.FlexColumn)
-	for _, field := range a.digimon.Fields {
-		fieldImage := tview.NewImage()
-		if image := services.GetImageByURL(field.Image); image != nil {
-			fieldImage.SetImage(image).SetFocusFunc(func() {
-				log.Println("Field image clicked:", field.Image)
-			})
-		} else {
-			log.Println("Failed to load field image:", field.Image)
-		}
-		fieldBlock.AddItem(fieldImage, 0, 1, false)
-	}
-	leftBlock.AddItem(fieldBlock, 3, 0, false)
+		SetText(fmt.Sprintf("Attributes: %s", attributes)).
+		SetTextColor(tcell.ColorLightCyan)
+	leftBlock.AddItem(digimonAttributes, 1, 0, false)
 
 	// Right block
 	var description string
@@ -269,26 +289,40 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		}
 	}
 	descriptionBlock := tview.NewFlex()
-	descriptionBlock.SetBorder(true)
-	descriptionBlock.SetTitle("Description").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorWhite)
+	descriptionBlock.SetBorder(true).SetBorderColor(tcell.ColorBlue)
+	descriptionBlock.SetTitle("Description").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorOrange)
 	descriptionBlock.AddItem(tview.NewTextView().
 		SetText(description).
-		SetTextColor(tcell.ColorWhiteSmoke), 0, 1, false)
+		SetTextColor(tcell.ColorLightCyan), 0, 1, false)
 
 	rightBlock.AddItem(descriptionBlock, 0, 1, false)
 
 	skillBlock := tview.NewFlex()
 	skillBlock.SetDirection(tview.FlexRow)
-	skillBlock.SetBorder(true)
-	skillBlock.SetTitle("Skills").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorWhite)
-	for _, skill := range a.digimon.Skills {
-		skillText := fmt.Sprintf("%s: %s", skill.Skill, skill.Description)
-		skillItem := tview.NewTextView().
-			SetText(skillText).
-			SetTextColor(tcell.ColorWhiteSmoke)
-		skillItem.SetWrap(true)
-		skillBlock.AddItem(skillItem, 0, 1, false)
+	skillBlock.SetBorder(true).SetBorderColor(tcell.ColorRed)
+	skillBlock.SetTitle("Skills").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorOrange)
+	var skillsText string
+	if len(a.digimon.Skills) == 0 {
+		skillsText = "No skills available"
+	} else {
+		skillsText = ""
 	}
+	for _, skill := range a.digimon.Skills {
+		if skill.Skill == "" {
+			continue
+		}
+		var skillText string
+		if skill.Description == "" {
+			skillText = fmt.Sprintf("%s", skill.Skill)
+		} else {
+			skillText = fmt.Sprintf("%s: %s", skill.Skill, skill.Description)
+		}
+		skillsText += skillText + "\n"
+	}
+	skillsTextView := tview.NewTextView().
+		SetText(skillsText).SetWrap(true)
+	skillsTextView.SetTextColor(tcell.ColorYellow)
+	skillBlock.AddItem(skillsTextView, 0, 1, false)
 	rightBlock.AddItem(skillBlock, 0, 1, false)
 
 	block.AddItem(leftBlock, 0, 1, false)
