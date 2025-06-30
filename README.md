@@ -49,7 +49,7 @@ go run cmd/main.go
 - **Browse Digimon**: Use the left panel to browse through available Digimon
 - **Pagination**: Use `<<` and `>>` buttons to navigate between pages
 - **View Details**: Click on any Digimon name to view detailed information
-- **Exit**: Press `Ctrl+C` or click the "⏻ Exit" button to quit
+- **Exit**: Press `Ctrl+C` or click the "Exit" button to quit
 
 ## Project Structure
 

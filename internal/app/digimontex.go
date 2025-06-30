@@ -5,17 +5,22 @@ import (
 	"image/png"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/sangnt1552314/digimontex/internal/models"
 	"github.com/sangnt1552314/digimontex/internal/services"
+	"github.com/sangnt1552314/digimontex/internal/services/cache"
 )
 
 type App struct {
 	*tview.Application
 	digimon      *models.DigimonDetail
 	digimonBlock *tview.Flex
+	cache        *cache.DigimonCache
+	loadingMutex sync.RWMutex
+	isLoading    bool
 }
 
 func NewApp() *App {
@@ -23,6 +28,7 @@ func NewApp() *App {
 		Application:  tview.NewApplication(),
 		digimon:      &models.DigimonDetail{},
 		digimonBlock: tview.NewFlex(),
+		cache:        cache.NewDigimonCache(10),
 	}
 
 	app.EnableMouse(true)
@@ -68,7 +74,7 @@ func (a *App) setupMainMenu() tview.Primitive {
 	menuFlex.SetBorder(true).SetBorderColor(tcell.ColorDarkCyan)
 	menuFlex.SetTitle("Options").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorWhite)
 
-	exitButton := tview.NewButton("⏻ Exit")
+	exitButton := tview.NewButton("Exit")
 	exitButton.SetStyle(tcell.StyleDefault.Foreground(tcell.ColorRed))
 	exitButton.SetSelectedFunc(func() {
 		a.Application.Stop()
@@ -84,20 +90,26 @@ func (a *App) setupMainContent() tview.Primitive {
 	mainContent.SetBorder(false).SetTitle("DigimonTex").SetTitleAlign(tview.AlignCenter)
 
 	digimonListBlock := tview.NewFlex()
-
-	// Fetch default digimon detail
-	// This could be any digimon, here we use "Greymon" as an example
-	// You can change this to any other digimon name or ID as needed
-	digimonDetail, err := services.GetDigimonByName("Greymon")
-	if err != nil {
-		log.Println("Failed to fetch digimon detail:", err)
-		return nil
-	}
-	a.digimon = digimonDetail
-
-	// Setup the digimon block and list
-	a.setupDigimonBlock(a.digimonBlock)
 	a.setupListDigimonBlock(digimonListBlock)
+
+	go func() {
+		// Fetch default digimon detail
+		// This could be any digimon, here we use "Greymon" as an example
+		// You can change this to any other digimon name or ID as needed
+		digimonDetail, err := services.GetDigimonByName("Greymon")
+		if err != nil {
+			log.Println("Failed to fetch digimon detail:", err)
+			return
+		}
+
+		a.QueueUpdateDraw(func() {
+			a.digimon = digimonDetail
+			if digimonDetail.ID > 0 {
+				a.cache.Put(digimonDetail.ID, digimonDetail)
+			}
+			a.setupDigimonBlock(a.digimonBlock)
+		})
+	}()
 
 	mainContent.AddItem(digimonListBlock, 0, 2, false)
 	mainContent.AddItem(a.digimonBlock, 0, 8, false)
@@ -149,28 +161,32 @@ func (a *App) buildDigimonList(list *tview.List, params models.DigimonSearchQuer
 	list.SetBorder(false)
 	list.Clear()
 
-	digimons, err := services.GetDigimonList(params)
+	// Show loading state
+	list.AddItem("Loading...", "", 0, nil)
 
-	list.SetMainTextColor(tcell.ColorOrange)
-	list.SetSelectedTextColor(tcell.ColorBlack)
-	list.SetSelectedBackgroundColor(tcell.ColorWhite)
+	// Use goroutine for API call
+	go func() {
+		digimons, err := services.GetDigimonList(params)
 
-	if err != nil {
-		log.Println("Failed to fetch digimon list:", err)
-		list.AddItem("Failed to fetch digimon list", "", 0, nil)
-	}
+		a.QueueUpdateDraw(func() {
+			list.Clear()
+			list.SetMainTextColor(tcell.ColorOrange)
+			list.SetSelectedTextColor(tcell.ColorBlack)
+			list.SetSelectedBackgroundColor(tcell.ColorWhite)
 
-	for _, digimon := range digimons {
-		list.AddItem(digimon.Name, "", 0, func() {
-			digimonDetail, err := services.GetDigimonByID(digimon.ID)
 			if err != nil {
-				log.Println("Failed to fetch digimon detail:", err)
-				return
+				log.Println("Failed to fetch digimon list:", err)
+				list.AddItem("Failed to fetch digimon list", "", 0, nil)
 			}
-			a.digimon = digimonDetail
-			a.setupDigimonBlock(a.digimonBlock)
+
+			for _, digimon := range digimons {
+				currentDigimon := digimon
+				list.AddItem(currentDigimon.Name, "", 0, func() {
+					a.loadDigimonDetail(currentDigimon.ID)
+				})
+			}
 		})
-	}
+	}()
 }
 
 func (a *App) setupDigimonBlock(block *tview.Flex) {
@@ -178,7 +194,25 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		log.Println("No digimon data available to display")
 		return
 	}
+
 	block.Clear()
+
+	a.loadingMutex.RLock()
+	isLoading := a.isLoading
+	a.loadingMutex.RUnlock()
+
+	if isLoading {
+		block.SetDirection(tview.FlexColumn)
+		block.SetBorder(true).SetBorderColor(tcell.ColorDarkCyan)
+
+		loadingText := tview.NewTextView().
+			SetText("Loading Digimon details...").
+			SetTextAlign(tview.AlignCenter).
+			SetTextColor(tcell.ColorYellow)
+
+		block.AddItem(loadingText, 0, 1, false)
+		return
+	}
 
 	block.SetDirection(tview.FlexColumn)
 	block.SetBorder(true).SetBorderColor(tcell.ColorDarkCyan)
@@ -194,19 +228,7 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		imageFlex.SetImage(image).SetAlign(0, 0)
 		imagesFlex.AddItem(imageFlex, 0, 8, false)
 	} else {
-		noImageFile, err := os.Open("assets/no-image.png")
-		if err != nil {
-			log.Println("Failed to open no-image.png:", err)
-		} else {
-			defer noImageFile.Close()
-			noImage, err := png.Decode(noImageFile)
-			if err != nil {
-				log.Println("Failed to decode no-image.png:", err)
-			} else {
-				imageFlex.SetImage(noImage).SetAlign(0, 0)
-			}
-		}
-		imagesFlex.AddItem(imageFlex, 0, 9, false)
+		a.loadFallbackImage(imageFlex, imagesFlex)
 	}
 
 	fieldBlock := tview.NewFlex().SetDirection(tview.FlexRow)
@@ -232,55 +254,103 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		SetTextColor(tcell.ColorSilver)
 	leftBlock.AddItem(digimonReleaseDate, 1, 0, false)
 
-	var levels string
-	if len(a.digimon.Levels) > 0 {
-		for i, t := range a.digimon.Levels {
-			if i > 0 {
-				levels += ", "
-			}
-			levels += t.Level
-		}
-	} else {
-		levels = "Unknown"
-	}
 	digimonLevel := tview.NewTextView().
-		SetText(fmt.Sprintf("Levels: %s", levels)).
+		SetText(fmt.Sprintf("Levels: %s", a.getDigimonLevels())).
 		SetTextColor(tcell.ColorGreen)
 	leftBlock.AddItem(digimonLevel, 1, 0, false)
 
-	var types string
-	if len(a.digimon.Types) > 0 {
-		for i, t := range a.digimon.Types {
-			if i > 0 {
-				types += ", "
-			}
-			types += t.Type
-		}
-	} else {
-		types = "Unknown"
-	}
 	digimonTypes := tview.NewTextView().
-		SetText(fmt.Sprintf("Types: %s", types)).
+		SetText(fmt.Sprintf("Types: %s", a.getDigimonTypes())).
 		SetTextColor(tcell.ColorPurple)
 	leftBlock.AddItem(digimonTypes, 1, 0, false)
 
-	var attributes string
-	if len(a.digimon.Attributes) > 0 {
-		for i, t := range a.digimon.Attributes {
-			if i > 0 {
-				attributes += ", "
-			}
-			attributes += t.Attribute
-		}
-	} else {
-		attributes = "Unknown"
-	}
 	digimonAttributes := tview.NewTextView().
-		SetText(fmt.Sprintf("Attributes: %s", attributes)).
+		SetText(fmt.Sprintf("Attributes: %s", a.getDigimonAttributes())).
 		SetTextColor(tcell.ColorLightCyan)
 	leftBlock.AddItem(digimonAttributes, 1, 0, false)
 
 	// Right block
+	descriptionBlock := tview.NewFlex()
+	descriptionBlock.SetBorder(true).SetBorderColor(tcell.ColorBlue)
+	descriptionBlock.SetTitle("Description").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorOrange)
+	descriptionBlock.AddItem(tview.NewTextView().
+		SetText(a.getDigimonDescription()).
+		SetTextColor(tcell.ColorLightCyan), 0, 1, false)
+
+	rightBlock.AddItem(descriptionBlock, 0, 1, false)
+
+	skillBlock := tview.NewFlex()
+	skillBlock.SetDirection(tview.FlexRow)
+	skillBlock.SetBorder(true).SetBorderColor(tcell.ColorRed)
+	skillBlock.SetTitle("Skills").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorOrange)
+
+	skillsTextView := tview.NewTextView().
+		SetText(a.getDigimonSkills()).SetWrap(true)
+	skillsTextView.SetTextColor(tcell.ColorYellow)
+	skillBlock.AddItem(skillsTextView, 0, 1, false)
+
+	rightBlock.AddItem(skillBlock, 0, 1, false)
+
+	block.AddItem(leftBlock, 0, 1, false)
+	block.AddItem(rightBlock, 0, 1, false)
+}
+
+func (a *App) loadDigimonDetail(digimonID int) {
+	// Check if already loading
+	a.loadingMutex.RLock()
+	if a.isLoading {
+		a.loadingMutex.RUnlock()
+		return
+	}
+	a.loadingMutex.RUnlock()
+
+	// Set loading state
+	a.loadingMutex.Lock()
+	a.isLoading = true
+	a.loadingMutex.Unlock()
+
+	// Check cache first
+	a.setupLoadingState()
+
+	// Use goroutine for API call
+	go func() {
+		digimonDetail, err := services.GetDigimonByID(digimonID)
+
+		// Update UI on main thread
+		a.QueueUpdateDraw(func() {
+			a.loadingMutex.Lock()
+			a.isLoading = false
+			a.loadingMutex.Unlock()
+
+			if err != nil {
+				log.Println("Failed to fetch digimon detail:", err)
+				return
+			}
+
+			// Cache the result
+			a.cache.Put(digimonID, digimonDetail)
+
+			// Update UI
+			a.digimon = digimonDetail
+			a.setupDigimonBlock(a.digimonBlock)
+		})
+	}()
+}
+
+func (a *App) setupLoadingState() {
+	a.digimonBlock.Clear()
+	a.digimonBlock.SetDirection(tview.FlexColumn)
+	a.digimonBlock.SetBorder(true).SetBorderColor(tcell.ColorDarkCyan)
+
+	loadingText := tview.NewTextView().
+		SetText("Loading Digimon details...").
+		SetTextAlign(tview.AlignCenter).
+		SetTextColor(tcell.ColorYellow)
+
+	a.digimonBlock.AddItem(loadingText, 0, 1, false)
+}
+
+func (a *App) getDigimonDescription() string {
 	var description string
 	for _, descriptionItem := range a.digimon.Descriptions {
 		if descriptionItem.Language == "en_us" {
@@ -290,19 +360,13 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 			description = "No description available in English"
 		}
 	}
-	descriptionBlock := tview.NewFlex()
-	descriptionBlock.SetBorder(true).SetBorderColor(tcell.ColorBlue)
-	descriptionBlock.SetTitle("Description").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorOrange)
-	descriptionBlock.AddItem(tview.NewTextView().
-		SetText(description).
-		SetTextColor(tcell.ColorLightCyan), 0, 1, false)
+	if description == "" {
+		description = "No description available"
+	}
+	return description
+}
 
-	rightBlock.AddItem(descriptionBlock, 0, 1, false)
-
-	skillBlock := tview.NewFlex()
-	skillBlock.SetDirection(tview.FlexRow)
-	skillBlock.SetBorder(true).SetBorderColor(tcell.ColorRed)
-	skillBlock.SetTitle("Skills").SetTitleAlign(tview.AlignLeft).SetTitleColor(tcell.ColorOrange)
+func (a *App) getDigimonSkills() string {
 	var skillsText string
 	if len(a.digimon.Skills) == 0 {
 		skillsText = "No skills available"
@@ -321,12 +385,66 @@ func (a *App) setupDigimonBlock(block *tview.Flex) {
 		}
 		skillsText += skillText + "\n"
 	}
-	skillsTextView := tview.NewTextView().
-		SetText(skillsText).SetWrap(true)
-	skillsTextView.SetTextColor(tcell.ColorYellow)
-	skillBlock.AddItem(skillsTextView, 0, 1, false)
-	rightBlock.AddItem(skillBlock, 0, 1, false)
+	return skillsText
+}
 
-	block.AddItem(leftBlock, 0, 1, false)
-	block.AddItem(rightBlock, 0, 1, false)
+func (a *App) getDigimonLevels() string {
+	var levels string
+	if len(a.digimon.Levels) > 0 {
+		for i, t := range a.digimon.Levels {
+			if i > 0 {
+				levels += ", "
+			}
+			levels += t.Level
+		}
+	} else {
+		levels = "Unknown"
+	}
+	return levels
+}
+
+func (a *App) getDigimonTypes() string {
+	var types string
+	if len(a.digimon.Types) > 0 {
+		for i, t := range a.digimon.Types {
+			if i > 0 {
+				types += ", "
+			}
+			types += t.Type
+		}
+	} else {
+		types = "Unknown"
+	}
+	return types
+}
+
+func (a *App) getDigimonAttributes() string {
+	var attributes string
+	if len(a.digimon.Attributes) > 0 {
+		for i, t := range a.digimon.Attributes {
+			if i > 0 {
+				attributes += ", "
+			}
+			attributes += t.Attribute
+		}
+	} else {
+		attributes = "Unknown"
+	}
+	return attributes
+}
+
+func (a *App) loadFallbackImage(imageFlex *tview.Image, imagesFlex *tview.Flex) {
+	noImageFile, err := os.Open("assets/no-image.png")
+	if err != nil {
+		log.Println("Failed to open no-image.png:", err)
+	} else {
+		defer noImageFile.Close()
+		noImage, err := png.Decode(noImageFile)
+		if err != nil {
+			log.Println("Failed to decode no-image.png:", err)
+		} else {
+			imageFlex.SetImage(noImage).SetAlign(0, 0)
+		}
+	}
+	imagesFlex.AddItem(imageFlex, 0, 8, false)
 }
