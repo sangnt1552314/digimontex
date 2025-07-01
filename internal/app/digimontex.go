@@ -379,9 +379,9 @@ func (a *App) getDigimonSkills() string {
 		}
 		var skillText string
 		if skill.Description == "" {
-			skillText = fmt.Sprintf("%s", skill.Skill)
+			skillText = fmt.Sprintf("- %s", skill.Skill)
 		} else {
-			skillText = fmt.Sprintf("%s: %s", skill.Skill, skill.Description)
+			skillText = fmt.Sprintf("- %s: %s", skill.Skill, skill.Description)
 		}
 		skillsText += skillText + "\n"
 	}
