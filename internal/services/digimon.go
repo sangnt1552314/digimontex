@@ -14,7 +14,7 @@ const (
 	baseURL = "https://digi-api.com/api/v1/digimon"
 )
 
-func GetDigimonList(params models.DigimonSearchQueryParams) ([]models.Digimon, error) {
+func GetDigimonList(params models.DigimonSearchQueryParams) (*models.DigimonResponse, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %v", err)
@@ -50,17 +50,7 @@ func GetDigimonList(params models.DigimonSearchQueryParams) ([]models.Digimon, e
 		return nil, fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	var digimonList []models.Digimon
-	for _, d := range apiResp.Content {
-		digimonList = append(digimonList, models.Digimon{
-			ID:    d.ID,
-			Name:  d.Name,
-			Href:  d.Href,
-			Image: d.Image,
-		})
-	}
-
-	return digimonList, nil
+	return &apiResp, nil
 }
 
 func GetDigimonByName(name string) (*models.DigimonDetail, error) {

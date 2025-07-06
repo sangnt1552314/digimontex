@@ -21,6 +21,12 @@ type App struct {
 	cache        *cache.DigimonCache
 	loadingMutex sync.RWMutex
 	isLoading    bool
+	currentPage  int
+	pageSize     int
+	digimonList  *tview.List
+	searchTerm   string
+	previousPage string
+	nextPage     string
 }
 
 func NewApp() *App {
@@ -29,6 +35,12 @@ func NewApp() *App {
 		digimon:      &models.DigimonDetail{},
 		digimonBlock: tview.NewFlex(),
 		cache:        cache.NewDigimonCache(10),
+		currentPage:  0,
+		pageSize:     10,
+		digimonList:  tview.NewList(),
+		searchTerm:   "",
+		previousPage: "",
+		nextPage:     "",
 	}
 
 	app.EnableMouse(true)
@@ -86,8 +98,10 @@ func (a *App) setupMainMenu() tview.Primitive {
 }
 
 func (a *App) setupMainContent() tview.Primitive {
-	mainContent := tview.NewFlex().SetDirection(tview.FlexColumn)
-	mainContent.SetBorder(false).SetTitle("DigimonTex").SetTitleAlign(tview.AlignCenter)
+	mainContent := tview.NewFlex().SetDirection(tview.FlexRow)
+
+	digimonContent := tview.NewFlex().SetDirection(tview.FlexColumn)
+	digimonContent.SetBorder(false).SetTitle("DigimonTex").SetTitleAlign(tview.AlignCenter)
 
 	digimonListBlock := tview.NewFlex()
 	a.setupListDigimonBlock(digimonListBlock)
@@ -111,16 +125,47 @@ func (a *App) setupMainContent() tview.Primitive {
 		})
 	}()
 
-	mainContent.AddItem(digimonListBlock, 0, 2, false)
-	mainContent.AddItem(a.digimonBlock, 0, 8, false)
+	digimonContent.AddItem(digimonListBlock, 0, 2, false)
+	digimonContent.AddItem(a.digimonBlock, 0, 8, false)
+
+	mainContent.AddItem(a.setupSearchBlock(), 1, 0, false)
+	mainContent.AddItem(digimonContent, 0, 9, false)
 
 	return mainContent
 }
+func (a *App) setupSearchBlock() tview.Primitive {
+	searchInput := tview.NewInputField().
+		SetFieldBackgroundColor(tcell.ColorNone).
+		SetFieldTextColor(tcell.ColorWhite).
+		SetLabel("Search: ").
+		SetLabelColor(tcell.ColorLightCyan)
+
+	searchInput.SetDoneFunc(func(key tcell.Key) {
+		if key == tcell.KeyEnter {
+			searchTerm := searchInput.GetText()
+			if searchTerm != "" {
+				a.searchTerm = searchTerm
+				a.currentPage = 0
+				a.buildDigimonList(a.digimonList, models.DigimonSearchQueryParams{
+					Name:     searchTerm,
+					PageSize: a.pageSize,
+					Page:     a.currentPage,
+				})
+			} else {
+				a.currentPage = 0
+				a.buildDigimonList(a.digimonList, models.DigimonSearchQueryParams{
+					PageSize: a.pageSize,
+					Page:     a.currentPage,
+				})
+				a.searchTerm = ""
+			}
+		}
+	})
+
+	return searchInput
+}
 
 func (a *App) setupListDigimonBlock(block *tview.Flex) {
-	page := 0
-	digimonList := tview.NewList()
-
 	block.SetDirection(tview.FlexRow)
 	block.SetBorder(true).SetBorderColor(tcell.ColorDarkCyan)
 
@@ -130,30 +175,36 @@ func (a *App) setupListDigimonBlock(block *tview.Flex) {
 	rightButton := tview.NewButton(">>")
 	rightButton.SetStyle(tcell.StyleDefault.Foreground(tcell.ColorGreen).Background(tcell.ColorBlack))
 	leftButton.SetSelectedFunc(func() {
-		if page > 0 {
-			page--
-			a.buildDigimonList(digimonList, models.DigimonSearchQueryParams{
-				PageSize: 10,
-				Page:     page,
+		if a.previousPage != "" && a.currentPage > 0 {
+			a.currentPage--
+			a.buildDigimonList(a.digimonList, models.DigimonSearchQueryParams{
+				PageSize: a.pageSize,
+				Page:     a.currentPage,
+				Name:     a.searchTerm,
 			})
 		}
 	})
 	rightButton.SetSelectedFunc(func() {
-		page++
-		a.buildDigimonList(digimonList, models.DigimonSearchQueryParams{
-			PageSize: 10,
-			Page:     page,
-		})
+		if a.nextPage != "" {
+			a.currentPage++
+			a.buildDigimonList(a.digimonList, models.DigimonSearchQueryParams{
+				PageSize: a.pageSize,
+				Page:     a.currentPage,
+				Name:     a.searchTerm,
+			})
+		}
 	})
+
+	a.buildDigimonList(a.digimonList, models.DigimonSearchQueryParams{
+		PageSize: a.pageSize,
+		Page:     a.currentPage,
+		Name:     a.searchTerm,
+	})
+
 	navigationFlex.AddItem(leftButton, 0, 1, false)
 	navigationFlex.AddItem(rightButton, 0, 1, false)
 
-	a.buildDigimonList(digimonList, models.DigimonSearchQueryParams{
-		PageSize: 10,
-		Page:     page,
-	})
-
-	block.AddItem(digimonList, 0, 1, false)
+	block.AddItem(a.digimonList, 0, 1, false)
 	block.AddItem(navigationFlex, 1, 0, false)
 }
 
@@ -166,7 +217,10 @@ func (a *App) buildDigimonList(list *tview.List, params models.DigimonSearchQuer
 
 	// Use goroutine for API call
 	go func() {
-		digimons, err := services.GetDigimonList(params)
+		digimonResponse, err := services.GetDigimonList(params)
+
+		a.previousPage = digimonResponse.Pageable.PreviousPage
+		a.nextPage = digimonResponse.Pageable.NextPage
 
 		a.QueueUpdateDraw(func() {
 			list.Clear()
@@ -179,7 +233,7 @@ func (a *App) buildDigimonList(list *tview.List, params models.DigimonSearchQuer
 				list.AddItem("Failed to fetch digimon list", "", 0, nil)
 			}
 
-			for _, digimon := range digimons {
+			for _, digimon := range digimonResponse.Content {
 				currentDigimon := digimon
 				list.AddItem(currentDigimon.Name, "", 0, func() {
 					a.loadDigimonDetail(currentDigimon.ID)
